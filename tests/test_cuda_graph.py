@@ -249,3 +249,61 @@ class TestCudaGraphForwardManager:
         out = manager(x_t=x_t, t=t, text_state=text_state, text_mask=text_mask)
         assert torch.allclose(out, baseline)
         assert manager.stats()["cache_entries"] == 0
+
+
+@requires_cuda
+class TestTimestepEmbeddingPatch:
+    """irodori_tts.model.get_timestep_embeddingは、timestepの値に依存しない
+    定数(freqs)を毎回torch.tensor(10000.0, device=...)で新規作成しており、
+    これが実機でCUDA Graphキャプチャ中に"operation not permitted when stream
+    is capturing"エラーを起こすことを確認済み(別PCでの検証で発生)。
+    _patch_timestep_embedding_for_captureがこれを解決することを検証する。"""
+
+    def test_patched_output_matches_original(self):
+        import irodori_tts.model as irodori_model
+
+        device = torch.device("cuda")
+        original_fn = irodori_model.get_timestep_embedding
+        t = torch.tensor([0.3, 0.7], device=device)
+        baseline = original_fn(t, 128)
+
+        cg._patch_timestep_embedding_for_capture()
+        patched_fn = irodori_model.get_timestep_embedding
+        out = patched_fn(t, 128)
+
+        assert torch.equal(out, baseline)
+
+    def test_idempotent(self):
+        import irodori_tts.model as irodori_model
+
+        cg._patch_timestep_embedding_for_capture()
+        patched_fn = irodori_model.get_timestep_embedding
+        cg._patch_timestep_embedding_for_capture()
+
+        assert irodori_model.get_timestep_embedding is patched_fn
+
+    def test_patched_function_is_capturable(self):
+        """修正前はここでCUDA Graphキャプチャ自体が例外になっていた
+        (operation not permitted when stream is capturing)。"""
+        import irodori_tts.model as irodori_model
+
+        device = torch.device("cuda")
+        cg._patch_timestep_embedding_for_capture()
+        patched_fn = irodori_model.get_timestep_embedding
+        t = torch.tensor([0.3, 0.7], device=device)
+        baseline = patched_fn(t, 128)
+
+        side_stream = torch.cuda.Stream(device=device)
+        side_stream.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side_stream):
+            for _ in range(2):
+                patched_fn(t, 128)
+        torch.cuda.current_stream(device).wait_stream(side_stream)
+        torch.cuda.synchronize(device)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            captured_out = patched_fn(t, 128)
+        graph.replay()
+
+        assert torch.equal(captured_out, baseline)

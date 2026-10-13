@@ -19,6 +19,12 @@
   delta_t引数を持つ)。想定外の引数が増えているとTypeErrorでクラッシュするため、
   起動時にシグネチャを検査し、既知の契約と一致しない場合は無効化する
   (_forward_signature_matches_known_contract参照)。
+- model.pyのget_timestep_embeddingは、timestepの値に依存しない定数(freqs)を
+  毎回torch.tensor(10000.0, device=...)で新規作成しており、これがCUDA Graph
+  キャプチャ中に"operation not permitted when stream is capturing"エラーを
+  起こすことを実機で確認した。freqsをdevice/dimごとに1回だけ計算してキャッシュ
+  する版にモンキーパッチする(_patch_timestep_embedding_for_capture参照。
+  model.pyファイル自体は変更しない)。
 """
 
 from __future__ import annotations
@@ -391,6 +397,44 @@ def _install_lora_kill_switch(runtime: InferenceRuntime, manager: CudaGraphForwa
     runtime.synthesize = guarded_synthesize
 
 
+def _patch_timestep_embedding_for_capture() -> None:
+    """irodori_tts.model.get_timestep_embeddingは、timestepの値に依存しない
+    定数(freqs)を毎回torch.tensor(10000.0, device=...)で新規作成している。
+    Pythonスカラーから新規にホスト→デバイスのテンソルを作る操作はCUDA Graph
+    キャプチャ中には許可されず、"operation not permitted when stream is
+    capturing"エラーになる(実機で確認)。freqsはdim(モデル設定で固定)が同じ
+    なら常に同じ値になるため、device/dimごとに1回だけ計算してキャッシュする
+    版にモジュール関数自体を差し替える(model.pyファイルは変更しない)。
+
+    CUDA Graph無効時に適用しても元の実装と同じ結果を返す(むしろ無駄な
+    再計算が減る)ため、無条件に適用してよい。冪等(二重適用を防ぐ)。"""
+    import irodori_tts.model as irodori_model
+
+    if getattr(irodori_model.get_timestep_embedding, "_cuda_graph_patched", False):
+        return
+
+    freqs_cache: dict[tuple[torch.device, int], torch.Tensor] = {}
+
+    def patched_get_timestep_embedding(timestep: torch.Tensor, dim: int) -> torch.Tensor:
+        assert dim % 2 == 0
+        half = dim // 2
+        key = (timestep.device, dim)
+        freqs = freqs_cache.get(key)
+        if freqs is None:
+            freqs = 1000.0 * torch.exp(
+                -torch.log(torch.tensor(10000.0, device=timestep.device, dtype=torch.float32))
+                * torch.arange(half, device=timestep.device, dtype=torch.float32)
+                / half
+            )
+            freqs_cache[key] = freqs
+        args = timestep[:, None].float() * freqs[None, :]
+        return torch.cat([torch.cos(args), torch.sin(args)], dim=-1).to(timestep.dtype)
+
+    patched_get_timestep_embedding._cuda_graph_patched = True
+    irodori_model.get_timestep_embedding = patched_get_timestep_embedding
+    logger.info("get_timestep_embeddingをCUDA Graph対応版(freqsキャッシュ)に差し替えました。")
+
+
 def maybe_install(runtime: InferenceRuntime, settings: Settings) -> None:
     """settings.use_cuda_graphが有効で、既知の非互換条件に当たらない場合のみ、
     runtime.model.forward_with_encoded_conditionsをCUDA Graph対応のラッパーに
@@ -430,6 +474,8 @@ def maybe_install(runtime: InferenceRuntime, settings: Settings) -> None:
             "(例: MeanFlow対応のdelta_t)が追加された可能性があります)。"
         )
         return
+
+    _patch_timestep_embedding_for_capture()
 
     manager = CudaGraphForwardManager(
         original_forward=runtime.model.forward_with_encoded_conditions,
