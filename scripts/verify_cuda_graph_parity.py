@@ -35,7 +35,9 @@ COMBOS = [
     {"num_candidates": 1, "seconds": 2.0, "cfg_guidance_mode": "independent"},
     {"num_candidates": 2, "seconds": 2.0, "cfg_guidance_mode": "independent"},
     {"num_candidates": 1, "seconds": 10.0, "cfg_guidance_mode": "independent"},
-    {"num_candidates": 1, "seconds": 2.0, "cfg_guidance_mode": "joint"},
+    # jointモードはcfg_scale_text/caption/speakerが全て等しいことを
+    # InferenceRuntime側(resolve_cfg_scales)が要求するため、cfg_scaleで統一する。
+    {"num_candidates": 1, "seconds": 2.0, "cfg_guidance_mode": "joint", "cfg_scale": 3.0},
     {"num_candidates": 1, "seconds": 2.0, "cfg_guidance_mode": "alternating"},
 ]
 
