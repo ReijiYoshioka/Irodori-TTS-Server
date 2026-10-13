@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import statistics
 import time
 
@@ -31,9 +32,17 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=5, help="計測から除外する先頭の実行回数")
     parser.add_argument("--label", default="run")
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("IRODORI_API_KEY"),
+        help="サーバー起動時にIRODORI_API_KEYを設定している場合に指定する"
+        "(環境変数IRODORI_API_KEYからも読む)。/v1/audio/speechはAPIキーが"
+        "設定されていると認証必須になるため、省略すると401 Unauthorizedになる。",
+    )
     args = parser.parse_args()
 
-    client = httpx.Client(base_url=args.base_url, timeout=120.0)
+    headers = {"Authorization": f"Bearer {args.api_key}"} if args.api_key else {}
+    client = httpx.Client(base_url=args.base_url, headers=headers, timeout=120.0)
 
     health_before = client.get("/health").json()
     print(f"[{args.label}] health.model: {health_before['model']}")
