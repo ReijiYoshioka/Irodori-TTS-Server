@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     codec_deterministic_decode: bool = True
     compile_model: bool = False
     compile_dynamic: bool = False
+    # CUDA Graphキャプチャ/リプレイでforward_with_encoded_conditions呼び出しを
+    # 高速化する(cuda_graph.py参照)。compile_modelと同時には使えない(互換性ガードで
+    # 自動的にcompile_model側を優先し、CUDA Graphは無効化される)。
+    use_cuda_graph: bool = False
+    # 未知のshape(初回・新しい長さ等)に遭遇したとき、キャプチャ前に実行する
+    # ウォームアップ回数。cuBLAS/cuDNNのアルゴリズム選択等をキャプチャ対象から
+    # 除外するために必要。
+    cuda_graph_warmup_steps: int = 3
+    # shape signatureごとにキャプチャしたCUDA Graphをキャッシュする最大件数。
+    # 超えた分はLRUで破棄する(GPUメモリの肥大化を防ぐ)。
+    cuda_graph_max_cache_entries: int = 8
     preload: bool = False
     model_load_timeout: float = 300.0
     max_concurrent_synthesis: int = 1

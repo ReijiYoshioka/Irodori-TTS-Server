@@ -49,6 +49,7 @@ class FakeRuntimeManager:
         self.checkpoint_path = None
         self.is_loaded = runtime is not None
         self.is_loading = exc is not None
+        self.cuda_graph_stats = None
         self.thread_ids: list[int] = []
 
     def get(self):
@@ -102,6 +103,36 @@ def test_health_does_not_load_model(tmp_path, monkeypatch):
     assert body["voices"]["dir_exists"] is True
     assert body["defaults"]["chunk_min_chars"] == main.settings.default_chunk_min_chars
     assert body["defaults"]["first_sentence_chunk_min_chars"] is None
+
+
+def test_health_reports_cuda_graph_settings_and_stats(monkeypatch):
+    """/healthのcuda_graph関連フィールドは、scripts/bench_cuda_graph.pyと
+    scripts/verify_cuda_graph_parity.pyが`health.get('cuda_graph')`等で読む
+    運用上のキーなので、名前や構造が壊れないことをテストで固定する。"""
+    monkeypatch.setattr(main.settings, "use_cuda_graph", True)
+    monkeypatch.setattr(main.settings, "cuda_graph_warmup_steps", 5)
+    monkeypatch.setattr(main.settings, "cuda_graph_max_cache_entries", 16)
+    fake_stats = {
+        "active": True,
+        "disabled_reason": None,
+        "cache_entries": 2,
+        "hits": 10,
+        "misses": 3,
+        "captures": 2,
+        "evictions": 0,
+    }
+    fake_manager = FakeRuntimeManager()
+    fake_manager.cuda_graph_stats = fake_stats
+    monkeypatch.setattr(main, "runtime_manager", fake_manager)
+
+    response = TestClient(main.app).get("/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model"]["use_cuda_graph"] is True
+    assert body["model"]["cuda_graph_warmup_steps"] == 5
+    assert body["model"]["cuda_graph_max_cache_entries"] == 16
+    assert body["cuda_graph"] == fake_stats
 
 
 def test_models_lists_configured_model():

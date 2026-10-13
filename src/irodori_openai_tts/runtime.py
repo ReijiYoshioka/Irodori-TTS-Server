@@ -12,6 +12,7 @@ from irodori_tts.inference_runtime import (
     download_hf_checkpoint,
 )
 
+from . import cuda_graph
 from .config import Settings
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,10 @@ class RuntimeManager:
                 )
                 elapsed = time.perf_counter() - t0
                 logger.info("runtime loaded in %.2fs", elapsed)
+                # irodori_tts本体には一切触れず、呼び出し側(このリポジトリ)だけで
+                # forward_with_encoded_conditions呼び出しをCUDA Graph化する
+                # (settings.use_cuda_graph=falseなら何もしない。cuda_graph.py参照)。
+                cuda_graph.maybe_install(self._runtime, self.settings)
             return self._runtime
         finally:
             self._lock.release()
@@ -68,6 +73,18 @@ class RuntimeManager:
     @property
     def checkpoint_path(self) -> str | None:
         return self._checkpoint_path
+
+    @property
+    def cuda_graph_stats(self) -> dict | None:
+        """CUDA Graphが有効化されていれば統計(hits/misses/captures/evictions等)を
+        返す。未ロード、または無効(settings.use_cuda_graph=false等)ならNone。
+        /healthから検証者がcurlだけで状態を確認できるようにするため。"""
+        if self._runtime is None:
+            return None
+        manager = getattr(self._runtime, "_cuda_graph_manager", None)
+        if manager is None:
+            return None
+        return manager.stats()
 
     @property
     def is_loaded(self) -> bool:

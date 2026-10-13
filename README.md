@@ -355,7 +355,7 @@ Common `irodori` options:
 | `cfg_scale_caption` | Strength of caption guidance. |
 | `max_caption_len` | Optional maximum caption token length. |
 
-Dynamic LoRA loading is per runtime process. The first request for an adapter loads it into memory; later requests for the same adapter reuse the cached adapter. To run the base model after an adapter has been loaded, omit `lora_adapter` or set it to `null`, `"none"`, or `"base"`. Dynamic LoRA is not compatible with `IRODORI_COMPILE_MODEL=true`.
+Dynamic LoRA loading is per runtime process. The first request for an adapter loads it into memory; later requests for the same adapter reuse the cached adapter. To run the base model after an adapter has been loaded, omit `lora_adapter` or set it to `null`, `"none"`, or `"base"`. Dynamic LoRA is not compatible with `IRODORI_COMPILE_MODEL=true`. Dynamic LoRA usage also permanently disables `IRODORI_USE_CUDA_GRAPH` for the remaining process lifetime (logged as a warning, and reflected in `/health`'s `cuda_graph.disabled_reason`); restart the server to re-enable it for non-LoRA workloads.
 
 ### Voice Management
 
@@ -559,6 +559,9 @@ All environment variables use the `IRODORI_` prefix. Request fields override the
 | `IRODORI_CODEC_PRECISION` | `fp32` | `fp32` or `bf16`. |
 | `IRODORI_COMPILE_MODEL` | `false` | Enable `torch.compile` for core inference methods. Keep disabled when using dynamic LoRA adapters. |
 | `IRODORI_COMPILE_DYNAMIC` | `false` | Use `dynamic=True` for `torch.compile`. |
+| `IRODORI_USE_CUDA_GRAPH` | `false` | Capture/replay `forward_with_encoded_conditions` with CUDA Graphs (CUDA only). Mutually exclusive with `IRODORI_COMPILE_MODEL=true` (compile wins) and automatically disabled if FlashAttention3 (`flash_attn_interface`) is installed, or permanently disabled for the process once a dynamic LoRA adapter is used. See `cuda_graph.py` for implementation notes. |
+| `IRODORI_CUDA_GRAPH_WARMUP_STEPS` | `3` | Eager-mode warmup runs for each new input shape before capturing a graph for it. |
+| `IRODORI_CUDA_GRAPH_MAX_CACHE_ENTRIES` | `8` | Maximum number of captured graphs (one per distinct input shape) kept in the LRU cache. |
 | `IRODORI_PRELOAD` | `false` | Load the model during startup. |
 | `IRODORI_MODEL_LOAD_TIMEOUT` | `300` | Seconds to wait for model loading. |
 | `IRODORI_MAX_CONCURRENT_SYNTHESIS` | `1` | Maximum simultaneous synthesis jobs. |

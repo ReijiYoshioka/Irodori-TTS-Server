@@ -176,6 +176,9 @@ def health() -> dict[str, Any]:
             "codec_precision": settings.codec_precision,
             "compile_model": settings.compile_model,
             "compile_dynamic": settings.compile_dynamic,
+            "use_cuda_graph": settings.use_cuda_graph,
+            "cuda_graph_warmup_steps": settings.cuda_graph_warmup_steps,
+            "cuda_graph_max_cache_entries": settings.cuda_graph_max_cache_entries,
         },
         "runtime": {
             "preload": settings.preload,
@@ -186,6 +189,7 @@ def health() -> dict[str, Any]:
             "max_concurrent_synthesis": settings.max_concurrent_synthesis,
             "synthesis_wait_timeout": settings.synthesis_wait_timeout,
         },
+        "cuda_graph": runtime_manager.cuda_graph_stats,
         "voices": {
             "dir": str(voices_dir),
             "dir_exists": voices_dir.is_dir(),
